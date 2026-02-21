@@ -1,0 +1,220 @@
+<<!DOCTYPE html>
+    <html lang="ja">
+
+    <head>
+        <meta charset="UTF-8">
+        <title>Advanced 3D Human TPS</title>
+        <style>
+            body {
+                margin: 0;
+                background: #000;
+                overflow: hidden;
+            }
+            
+            canvas {
+                display: block;
+                cursor: crosshair;
+            }
+            
+            #ui {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                color: white;
+                font-family: 'Segoe UI', sans-serif;
+                pointer-events: none;
+                text-shadow: 2px 2px 4px #000;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div id="ui"><strong>マウス操作:</strong> 視点移動(上下左右) / <strong>WASD:</strong> 移動</div>
+        <canvas id="gameCanvas"></canvas>
+
+        <script>
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+            let w, h;
+            const resize = () => {
+                w = canvas.width = window.innerWidth;
+                h = canvas.height = window.innerHeight;
+            };
+            window.onresize = resize;
+            resize();
+
+            const player = {
+                x: 5,
+                y: 5,
+                dir: 0,
+                pitch: 0,
+                speed: 0.08,
+                walkCycle: 0,
+                isMoving: false
+            };
+            const map = [
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                [1, 0, 0, 0, 0, 0, 2, 0, 0, 1],
+                [1, 0, 2, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 0, 0, 0, 0, 0, 2, 0, 1],
+                [1, 0, 0, 0, 1, 1, 0, 0, 0, 1],
+                [1, 0, 2, 0, 1, 1, 0, 0, 0, 1],
+                [1, 0, 0, 0, 0, 0, 0, 2, 0, 1],
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+                [1, 0, 2, 0, 0, 0, 2, 0, 0, 1],
+                [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+            ];
+
+            const keys = {};
+            window.onkeydown = e => keys[e.code] = true;
+            window.onkeyup = e => keys[e.code] = false;
+            canvas.onclick = () => canvas.requestPointerLock();
+
+            document.onmousemove = e => {
+                if (document.pointerLockElement) {
+                    player.dir += e.movementX * 0.002;
+                    player.pitch -= e.movementY * 2.0; // 上下視点移動
+                    player.pitch = Math.max(-h / 2, Math.min(h / 2, player.pitch)); // 限界設定
+                }
+            };
+
+            function drawHuman(x, y) {
+                const cycle = player.isMoving ? Math.sin(player.walkCycle) : 0;
+                const bodyTilt = player.isMoving ? Math.sin(player.walkCycle) * 0.05 : 0;
+
+                ctx.save();
+                ctx.translate(x, y + player.pitch * 0.2); // 視点に合わせてキャラ位置も微調整
+                ctx.scale(1.5, 1.5);
+
+                // 影
+                ctx.fillStyle = "rgba(0,0,0,0.3)";
+                ctx.beginPath();
+                ctx.ellipse(0, 100, 30, 10, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 足の動き（膝の屈伸をシミュレート）
+                const drawLeg = (side) => {
+                    const s = side === 'L' ? 1 : -1;
+                    const swing = Math.sin(player.walkCycle) * s;
+                    ctx.fillStyle = "#1a1a1a";
+                    ctx.beginPath();
+                    ctx.moveTo(s * 5, 55);
+                    ctx.lineTo(s * 8 + swing * 15, 100); // 足首
+                    ctx.lineTo(s * 15 + swing * 15, 100); // つま先
+                    ctx.lineWidth = 10;
+                    ctx.lineCap = "round";
+                    ctx.strokeStyle = "#1a1a1a";
+                    ctx.stroke();
+                };
+                drawLeg('L');
+                drawLeg('R');
+
+                // 胴体（肩のライン）
+                ctx.rotate(bodyTilt);
+                ctx.fillStyle = "#2d3436";
+                ctx.beginPath();
+                ctx.moveTo(-20, 20);
+                ctx.lineTo(20, 20);
+                ctx.lineTo(15, 60);
+                ctx.lineTo(-15, 60);
+                ctx.closePath();
+                ctx.fill();
+
+                // 腕（振り子運動）
+                const drawArm = (side) => {
+                    const s = side === 'L' ? 1 : -1;
+                    const swing = Math.sin(player.walkCycle) * -s;
+                    ctx.strokeStyle = "#3d4446";
+                    ctx.lineWidth = 8;
+                    ctx.beginPath();
+                    ctx.moveTo(s * 18, 25);
+                    ctx.lineTo(s * 25 + swing * 10, 55);
+                    ctx.stroke();
+                };
+                drawArm('L');
+                drawArm('R');
+
+                // 頭部（立体感のある髪）
+                ctx.fillStyle = "#ffdbac";
+                ctx.beginPath();
+                ctx.arc(0, 5, 15, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#2d3436"; // 髪
+                ctx.beginPath();
+                ctx.arc(0, 2, 16, Math.PI, 0);
+                ctx.fill();
+                ctx.fillRect(-16, -5, 32, 10);
+
+                ctx.restore();
+            }
+
+            function draw() {
+                const horizon = h / 2 + player.pitch; // 上下視点による地平線の移動
+
+                // 空と地面
+                const sky = ctx.createLinearGradient(0, 0, 0, h);
+                sky.addColorStop(0, "#000814");
+                sky.addColorStop(0.5, "#003566");
+                ctx.fillStyle = sky;
+                ctx.fillRect(0, 0, w, h);
+                ctx.fillStyle = "#0a1e0a";
+                ctx.fillRect(0, horizon, w, h - horizon);
+
+                // 3D レンダリング
+                const fov = Math.PI / 3;
+                for (let x = 0; x < w; x += 2) {
+                    const rayAngle = (player.dir - fov / 2) + (x / w) * fov;
+                    let dist = 0,
+                        hit = 0,
+                        cosA = Math.cos(rayAngle),
+                        sinA = Math.sin(rayAngle);
+
+                    while (dist < 15) {
+                        dist += 0.05;
+                        const tx = Math.floor(player.x + cosA * dist),
+                            ty = Math.floor(player.y + sinA * dist);
+                        if (map[ty] && map[ty][tx] > 0) {
+                            hit = map[ty][tx];
+                            break;
+                        }
+                    }
+
+                    dist *= Math.cos(rayAngle - player.dir);
+                    const wallH = h / dist;
+                    const y0 = horizon - wallH / 2;
+                    const bright = Math.max(0, 200 - (dist * 15));
+
+                    ctx.globalAlpha = 0.5; // アンチエイリアス
+                    ctx.fillStyle = hit === 1 ? `rgb(${bright*0.4},${bright*0.5},${bright*0.7})` : `rgb(${bright*0.2},${bright*0.5},0)`;
+                    ctx.fillRect(x, y0 - 1, 2.5, wallH + 2);
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillRect(x, y0, 2.5, wallH);
+                }
+
+                drawHuman(w / 2, h / 2 + 50);
+            }
+
+            function loop() {
+                const dx = Math.cos(player.dir) * player.speed,
+                    dy = Math.sin(player.dir) * player.speed;
+                const sx = Math.sin(player.dir) * player.speed,
+                    sy = -Math.cos(player.dir) * player.speed;
+                player.isMoving = false;
+                const move = (x, y) => {
+                    if (map[Math.floor(player.y)][Math.floor(player.x + x)] === 0) player.x += x;
+                    if (map[Math.floor(player.y + y)][Math.floor(player.x)] === 0) player.y += y;
+                    player.isMoving = true;
+                };
+                if (keys['KeyW']) move(dx, dy);
+                if (keys['KeyS']) move(-dx, -dy);
+                if (keys['KeyA']) move(sx, sy);
+                if (keys['KeyD']) move(-sx, -sy);
+                if (player.isMoving) player.walkCycle += 0.15;
+                draw();
+                requestAnimationFrame(loop);
+            }
+            loop();
+        </script>
+    </body>
+
+    </html>
