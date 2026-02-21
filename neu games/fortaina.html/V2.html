@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>3D Steve Static Fixed</title>
+    <style>
+        body {
+            margin: 0;
+            background: #87ceeb;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        #overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.3);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            font-size: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="overlay">CLICK TO START</div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let w, h, keys = {},
+            isLocked = false;
+
+        const resize = () => {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+        };
+        window.onresize = resize;
+        resize();
+
+        // rx: 縦, ry: 横 (上下左右反転設定済み)
+        const player = {
+            x: 10,
+            y: 0,
+            z: 10,
+            rx: 0,
+            ry: 0,
+            modelRy: 0,
+            walk: 0,
+            vy: 0,
+            onGround: true
+        };
+
+        document.getElementById('overlay').onclick = () => canvas.requestPointerLock();
+        document.addEventListener('pointerlockchange', () => {
+            isLocked = (document.pointerLockElement === canvas);
+            document.getElementById('overlay').style.display = isLocked ? 'none' : 'flex';
+        });
+
+        // 【操作反転】右に動かすと左、上に動かすと下を向く
+        document.addEventListener('mousemove', e => {
+            if (isLocked) {
+                player.ry -= e.movementX * 0.005;
+                player.rx = Math.max(-0.8, Math.min(0.8, player.rx - e.movementY * 0.005));
+            }
+        });
+
+        window.onkeydown = e => {
+            keys[e.code] = true;
+            if (e.code === 'Space' && player.onGround) {
+                player.vy = 0.2;
+                player.onGround = false;
+            }
+        };
+        window.onkeyup = e => keys[e.code] = false;
+
+        function project(x, y, z) {
+            const camDist = 7.5;
+            const camX = player.x - Math.sin(player.ry) * camDist * Math.cos(player.rx);
+            const camZ = player.z - Math.cos(player.ry) * camDist * Math.cos(player.rx);
+            const camY = player.y - (3.5 + 6 * player.rx);
+
+            let dx = x - camX,
+                dy = y - camY,
+                dz = z - camZ;
+            let rz = dz * Math.cos(-player.ry) - dx * Math.sin(-player.ry);
+            let rx = dz * Math.sin(-player.ry) + dx * Math.cos(-player.ry);
+            let finalY = dy * Math.cos(player.rx) - rz * Math.sin(player.rx);
+            let finalZ = dy * Math.sin(player.rx) + rz * Math.cos(player.rx);
+
+            if (finalZ <= 0.1) return null;
+            const f = (w / 1.1) / finalZ;
+            return {
+                x: w / 2 + rx * f,
+                y: h / 2 + finalY * f
+            };
+        }
+
+        // 全6面を漏れなく描画
+        function drawFullBox(px, py, pz, bw, bh, bd, color, ry, rx = 0) {
+            const cosY = Math.cos(ry),
+                sinY = Math.sin(ry);
+            const cosX = Math.cos(rx),
+                sinX = Math.sin(rx);
+
+            const getPt = (lx, ly, lz) => {
+                let ty = ly * cosX - lz * sinX;
+                let tz = ly * sinX + lz * cosX;
+                const finalX = lx * cosY + tz * sinY;
+                const finalZ = -lx * sinY + tz * cosY;
+                return project(px + finalX, py + ty, pz + finalZ);
+            };
+
+            const g = 1.05;
+            const w2 = bw / 2 * g,
+                h2 = bh * g,
+                d2 = bd / 2 * g;
+            const p = [
+                getPt(-w2, 0, -d2), getPt(w2, 0, -d2), getPt(w2, h2, -d2), getPt(-w2, h2, -d2),
+                getPt(-w2, 0, d2), getPt(w2, 0, d2), getPt(w2, h2, d2), getPt(-w2, h2, d2)
+            ];
+            if (p.some(v => v === null)) return;
+
+            const face = (idx, shade) => {
+                ctx.fillStyle = color;
+                ctx.globalAlpha = shade;
+                ctx.beginPath();
+                idx.forEach((i, n) => n === 0 ? ctx.moveTo(p[i].x, p[i].y) : ctx.lineTo(p[i].x, p[i].y));
+                ctx.closePath();
+                ctx.fill();
+            };
+
+            face([4, 5, 6, 7], 1.0); // 前
+            face([0, 1, 2, 3], 0.5); // 後
+            face([0, 4, 7, 3], 0.7); // 左
+            face([1, 5, 6, 2], 0.7); // 右
+            face([0, 1, 5, 4], 0.8); // 上
+            face([3, 2, 6, 7], 0.4); // 下
+        }
+
+        function mainLoop() {
+            if (isLocked) {
+                if (!player.onGround) {
+                    player.y -= player.vy;
+                    player.vy -= 0.015;
+                    if (player.y >= 0) {
+                        player.y = 0;
+                        player.onGround = true;
+                    }
+                }
+
+                const spd = keys['ShiftLeft'] ? 0.2 : 0.12;
+                let moving = false;
+                if (keys['KeyW']) {
+                    player.x += Math.sin(player.ry) * spd;
+                    player.z += Math.cos(player.ry) * spd;
+                    moving = true;
+                }
+                if (keys['KeyS']) {
+                    player.x -= Math.sin(player.ry) * spd;
+                    player.z -= Math.cos(player.ry) * spd;
+                    moving = true;
+                }
+                if (keys['KeyA']) {
+                    player.x += Math.cos(player.ry) * spd;
+                    player.z -= Math.sin(player.ry) * spd;
+                    moving = true;
+                }
+                if (keys['KeyD']) {
+                    player.x -= Math.cos(player.ry) * spd;
+                    player.z += Math.sin(player.ry) * spd;
+                    moving = true;
+                }
+
+                player.modelRy = player.ry;
+                if (moving) player.walk += 0.25;
+                else player.walk = 0;
+            }
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = "#87ceeb";
+            ctx.fillRect(0, 0, w, h);
+
+            // 地面
+            for (let i = 8; i < 12; i++)
+                for (let j = 8; j < 12; j++) drawFullBox(i, 0.5, j, 0.9, 0.5, 0.9, (i + j) % 2 === 0 ? "#2ecc71" : "#27ae60", 0);
+
+            const px = player.x,
+                py = player.y,
+                pz = player.z,
+                ry = player.modelRy;
+            const sw = Math.sin(player.walk) * 0.6;
+
+            // アバター
+            drawFullBox(px, py - 1.8, pz, 0.6, 0.9, 0.3, "#3498db", ry); // 胴体
+            drawFullBox(px, py - 2.35, pz, 0.5, 0.5, 0.5, "#ffdbac", ry, player.rx); // 頭
+
+            const os = (ox, oz) => ({
+                x: ox * Math.cos(ry) + oz * Math.sin(ry),
+                z: -ox * Math.sin(ry) + oz * Math.cos(ry)
+            });
+            const lf = os(-0.16, 0);
+            drawFullBox(px + lf.x, py - 0.9, pz + lf.z, 0.3, 0.9, 0.3, "#111", ry, sw);
+            const rf = os(0.16, 0);
+            drawFullBox(px + rf.x, py - 0.9, pz + rf.z, 0.3, 0.9, 0.3, "#111", ry, -sw);
+            const ra = os(0.45, 0);
+            drawFullBox(px + ra.x, py - 1.8, pz + ra.z, 0.28, 0.9, 0.28, "#ffdbac", ry, -sw);
+            const la = os(-0.45, 0);
+            drawFullBox(px + la.x, py - 1.8, pz + la.z, 0.28, 0.9, 0.28, "#ffdbac", ry, sw);
+
+            requestAnimationFrame(mainLoop);
+        }
+        mainLoop();
+    </script>
+</body>
+
+</html>

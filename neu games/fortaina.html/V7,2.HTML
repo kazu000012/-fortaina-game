@@ -1,0 +1,1203 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <title>3D m1 - Head Visibility Fixed</title>
+    <style>
+        body {
+            margin: 0;
+            background: #aee2ff;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        #overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.4);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 100;
+            font-size: 18px;
+            text-align: center;
+        }
+
+        #startPanel {
+            background: rgba(0, 0, 0, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 12px;
+            padding: 18px 20px;
+            min-width: 260px;
+        }
+
+        .startBtns {
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        #roomInput {
+            margin-top: 12px;
+            width: 100%;
+            box-sizing: border-box;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-radius: 8px;
+            padding: 9px 10px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        #roomInput::placeholder {
+            color: rgba(255, 255, 255, 0.75);
+        }
+
+        .startBtns button {
+            border: 0;
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        #copyInvite {
+            margin-top: 10px;
+            border: 0;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+        }
+
+        #mobileUI {
+            position: absolute;
+            inset: 0;
+            display: none;
+            z-index: 120;
+            touch-action: none;
+            pointer-events: none;
+        }
+
+        #leftStick,
+        #rightLook,
+        #btnJump,
+        #btnRun {
+            pointer-events: auto;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #leftStick {
+            position: absolute;
+            left: 18px;
+            bottom: 20px;
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        #stickKnob {
+            position: absolute;
+            left: 43px;
+            top: 43px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.45);
+        }
+
+        #rightLook {
+            position: absolute;
+            right: 14px;
+            bottom: 14px;
+            width: 45vw;
+            height: 45vh;
+            min-width: 180px;
+            min-height: 180px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+        }
+
+        #btnJump,
+        #btnRun {
+            position: absolute;
+            right: 18px;
+            width: 76px;
+            height: 44px;
+            border-radius: 10px;
+            border: 0;
+            font-weight: 700;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.45);
+        }
+
+        #btnJump {
+            bottom: 170px;
+        }
+
+        #btnRun {
+            bottom: 116px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="overlay">
+        <div id="startPanel">
+            <div>操作方法を選択</div>
+            <input id="roomInput" placeholder="招待リンク or ルームID (空欄=default)">
+            <div class="startBtns">
+                <button id="startKeyboard">キーボード</button>
+                <button id="startMobile">スマホ</button>
+            </div>
+            <button id="copyInvite">このルームの招待リンクをコピー</button>
+        </div>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <div id="mobileUI">
+        <div id="leftStick"><div id="stickKnob"></div></div>
+        <div id="rightLook"></div>
+        <button id="btnJump">JUMP</button>
+        <button id="btnRun">RUN</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const mobileUI = document.getElementById('mobileUI');
+        const startKeyboardBtn = document.getElementById('startKeyboard');
+        const startMobileBtn = document.getElementById('startMobile');
+        const roomInput = document.getElementById('roomInput');
+        const copyInviteBtn = document.getElementById('copyInvite');
+        const leftStick = document.getElementById('leftStick');
+        const stickKnob = document.getElementById('stickKnob');
+        const rightLook = document.getElementById('rightLook');
+        const btnJump = document.getElementById('btnJump');
+        const btnRun = document.getElementById('btnRun');
+        let w, h, keys = {},
+            isLocked = false;
+        let controlMode = null;
+        let moveInputX = 0,
+            moveInputZ = 0,
+            mobileRun = false,
+            mobileJump = false;
+        let leftTouchId = null,
+            rightTouchId = null,
+            runTouchId = null;
+        const lookTouchPos = {
+            x: 0,
+            y: 0
+        };
+        const stick = {
+            active: false,
+            x: 65,
+            y: 65,
+            max: 42
+        };
+
+        const resize = () => {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+        };
+        window.onresize = resize;
+        resize();
+
+        const player = {
+            x: 2,
+            y: 0,
+            z: 2,
+            rx: 0.2,
+            ry: 0,
+            walk: 0,
+            vy: 0,
+            onGround: true,
+            dist: 12.0
+        };
+        const hillSpots = [{
+            x: -26,
+            z: 18,
+            h: 1.0,
+            r: 9
+        }, {
+            x: 12,
+            z: -28,
+            h: 0.8,
+            r: 8
+        }, {
+            x: 58,
+            z: 22,
+            h: 0.9,
+            r: 10
+        }, {
+            x: 100,
+            z: 100,
+            h: -50,
+            r: 24,
+            rSteep: 13,
+            castleSideSteep: true,
+            occluder: true
+        }];
+
+        function getHillContribution(hill, x, z) {
+            const dx = x - hill.x;
+            const dz = z - hill.z;
+            const d2 = dx * dx + dz * dz;
+            let radius = hill.r;
+            if (hill.castleSideSteep) {
+                const toCastleX = castleCenterX - hill.x;
+                const toCastleZ = castleCenterZ - hill.z;
+                const len = Math.hypot(toCastleX, toCastleZ) || 1;
+                const castleDirX = toCastleX / len;
+                const castleDirZ = toCastleZ / len;
+                const dot = dx * castleDirX + dz * castleDirZ;
+                if (dot > 0) radius = hill.rSteep || hill.r;
+            }
+            return hill.h * Math.exp(-d2 / (radius * radius));
+        }
+
+        function getMountainInfluence(x, z) {
+            let inf = 0;
+            for (const hill of hillSpots) {
+                if (!hill.occluder) continue;
+                inf += Math.abs(getHillContribution(hill, x, z));
+            }
+            return inf;
+        }
+
+        function getTerrainRawY(x, z) {
+            let y = Math.sin(x * 0.3) * 0.5 + Math.cos(z * 0.3) * 0.5;
+            for (const hill of hillSpots) {
+                y += getHillContribution(hill, x, z);
+            }
+            return y;
+        }
+        const playerRadius = 0.35;
+        const castleCenterX = 30;
+        const castleCenterZ = 0;
+        const castleOuterW = 34;
+        const castleOuterD = 24;
+        const castleWallT = 1.5;
+        const castleWallH = 4.8;
+        const castleTowerW = 5.2;
+        const castleTowerH = 7.5;
+        const castleGateWidth = 7.0;
+        const castleMinX = castleCenterX - castleOuterW / 2;
+        const castleMaxX = castleCenterX + castleOuterW / 2;
+        const castleMinZ = castleCenterZ - castleOuterD / 2;
+        const castleMaxZ = castleCenterZ + castleOuterD / 2;
+        const castleFrontWallZ = castleCenterZ + (castleOuterD / 2 - castleWallT / 2);
+        const castleBackWallZ = castleCenterZ - (castleOuterD / 2 - castleWallT / 2);
+        const castleLeftWallX = castleCenterX - (castleOuterW / 2 - castleWallT / 2);
+        const castleRightWallX = castleCenterX + (castleOuterW / 2 - castleWallT / 2);
+        const castleTowerFullH = castleWallH + castleTowerH;
+        const castleTowerRadius = castleTowerW * 0.5;
+        const castleGroundY = getTerrainRawY(castleCenterX, castleCenterZ);
+        const castleWallTopY = castleGroundY - castleWallH;
+        const castleTowerTopY = castleGroundY - castleTowerFullH;
+        const castleFlatHalfW = castleOuterW / 2 + 6;
+        const castleFlatHalfD = castleOuterD / 2 + 6;
+        const treeCount = 12;
+        const treeRingRadiusX = 28;
+        const treeRingRadiusZ = 22;
+        const treeTrunkRadius = 1.0;
+        const treeTrunkHeight = 3.4;
+        const maxSlopeDeg = 60;
+        const maxSlopeTan = Math.tan((maxSlopeDeg * Math.PI) / 180);
+        const castleTrees = Array.from({
+            length: treeCount
+        }, (_, i) => {
+            const a = (Math.PI * 2 * i) / treeCount;
+            return {
+                x: castleCenterX + Math.cos(a) * treeRingRadiusX,
+                z: castleCenterZ + Math.sin(a) * treeRingRadiusZ
+            };
+        });
+        let doorOpen = 0;
+        let lastTime = performance.now();
+        const alexa = {
+            x: castleCenterX + 18,
+            y: 0,
+            z: castleCenterZ - 16,
+            ry: 0,
+            walk: 0,
+            targetX: castleCenterX + 18,
+            targetZ: castleCenterZ - 16,
+            retargetTimer: 0,
+            sideSign: 1,
+            tauntPhase: 0
+        };
+        const net = {
+            socket: null,
+            connected: false,
+            id: null,
+            peers: new Map(),
+            room: new URLSearchParams(location.search).get('room') || 'default',
+            wsHint: new URLSearchParams(location.search).get('ws') || '',
+            lastSendAt: 0
+        };
+
+        roomInput.value = net.room;
+
+        function parseRoomValue(raw) {
+            const v = (raw || '').trim();
+            if (!v) return 'default';
+            if (v.includes('://') || v.includes('?room=')) {
+                try {
+                    const u = new URL(v);
+                    return u.searchParams.get('room') || 'default';
+                } catch {
+                    // fall through
+                }
+            }
+            return v;
+        }
+
+        function applyRoomInput() {
+            net.room = parseRoomValue(roomInput.value);
+            roomInput.value = net.room;
+        }
+
+        async function copyInviteLink() {
+            applyRoomInput();
+            const link = `${location.origin}${location.pathname}?room=${encodeURIComponent(net.room)}`;
+            try {
+                await navigator.clipboard.writeText(link);
+                copyInviteBtn.textContent = "コピーしました";
+                setTimeout(() => copyInviteBtn.textContent = "このルームの招待リンクをコピー", 1200);
+            } catch {
+                prompt("このリンクを共有してください", link);
+            }
+        }
+        copyInviteBtn.onclick = copyInviteLink;
+
+        function connectMultiplayer() {
+            if (net.socket && (net.socket.readyState === WebSocket.OPEN || net.socket.readyState === WebSocket.CONNECTING)) return;
+            const localHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            let url = '';
+            if (net.wsHint) {
+                url = net.wsHint.trim();
+                if (url.startsWith('http://')) url = 'ws://' + url.slice(7);
+                if (url.startsWith('https://')) url = 'wss://' + url.slice(8);
+            } else if (localHost) {
+                const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+                url = `${proto}://${location.hostname || 'localhost'}:8080`;
+            } else {
+                const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+                url = `${proto}://${location.host}`;
+            }
+            url += `${url.includes('?') ? '&' : '?'}room=${encodeURIComponent(net.room)}`;
+            try {
+                const ws = new WebSocket(url);
+                net.socket = ws;
+                ws.onopen = () => {
+                    net.connected = true;
+                };
+                ws.onmessage = ev => {
+                    let msg;
+                    try {
+                        msg = JSON.parse(ev.data);
+                    } catch {
+                        return;
+                    }
+                    if (msg.type === 'welcome') {
+                        net.id = msg.id;
+                        return;
+                    }
+                    if (msg.type === 'snapshot' && Array.isArray(msg.players)) {
+                        net.peers.clear();
+                        for (const p of msg.players) {
+                            if (!p || p.id === net.id) continue;
+                            net.peers.set(p.id, p.state || {});
+                        }
+                        return;
+                    }
+                    if (msg.type === 'state' && msg.id && msg.id !== net.id) {
+                        net.peers.set(msg.id, msg.state || {});
+                        return;
+                    }
+                    if (msg.type === 'remove' && msg.id) {
+                        net.peers.delete(msg.id);
+                    }
+                };
+                ws.onclose = () => {
+                    net.connected = false;
+                    net.id = null;
+                    net.peers.clear();
+                    setTimeout(connectMultiplayer, 2000);
+                };
+                ws.onerror = () => ws.close();
+            } catch {
+                setTimeout(connectMultiplayer, 2000);
+            }
+        }
+
+        function sendLocalState(now) {
+            if (!net.connected || !net.socket || net.socket.readyState !== WebSocket.OPEN) return;
+            if (now - net.lastSendAt < 50) return;
+            net.lastSendAt = now;
+            net.socket.send(JSON.stringify({
+                type: 'state',
+                state: {
+                    x: player.x,
+                    y: player.y,
+                    z: player.z,
+                    ry: player.ry,
+                    rx: player.rx,
+                    walk: player.walk
+                }
+            }));
+        }
+
+        function getTerrainY(x, z) {
+            const base = getTerrainRawY(x, z);
+            const dx = Math.abs(x - castleCenterX);
+            const dz = Math.abs(z - castleCenterZ);
+            if (dx >= castleFlatHalfW || dz >= castleFlatHalfD) return base;
+            const t = Math.max(dx / castleFlatHalfW, dz / castleFlatHalfD);
+            const edgeStart = 0.72;
+            if (t <= edgeStart) return castleGroundY;
+            const u = (t - edgeStart) / (1 - edgeStart);
+            const s = u * u * (3 - 2 * u);
+            return castleGroundY * (1 - s) + base * s;
+        }
+
+        function collidesWithCastleWallsAt(x, z, r, y = null) {
+            const outerPad = castleTowerRadius + r;
+            if (x < castleMinX - outerPad || x > castleMaxX + outerPad || z < castleMinZ - outerPad || z > castleMaxZ + outerPad) return false;
+
+            const frontOpenHalf = (castleGateWidth * 0.5) * doorOpen;
+            const inBackWall = z >= castleMinZ - r && z <= castleMinZ + castleWallT + r && x >= castleMinX - r && x <= castleMaxX + r;
+            const inLeftWall = x >= castleMinX - r && x <= castleMinX + castleWallT + r && z >= castleMinZ - r && z <= castleMaxZ + r;
+            const inRightWall = x >= castleMaxX - castleWallT - r && x <= castleMaxX + r && z >= castleMinZ - r && z <= castleMaxZ + r;
+            const inFrontWallBand = z >= castleMaxZ - castleWallT - r && z <= castleMaxZ + r && x >= castleMinX - r && x <= castleMaxX + r;
+            const frontBlockedByDoor = inFrontWallBand && Math.abs(x - castleCenterX) >= frontOpenHalf;
+            const wallHeightHit = (y === null) || (y >= castleWallTopY - r && y <= castleGroundY + r);
+            const wallHit = wallHeightHit && (inBackWall || inLeftWall || inRightWall || frontBlockedByDoor);
+
+            const towerHeightHit = (y === null) || (y >= castleTowerTopY - r && y <= castleGroundY + r);
+            let towerHit = false;
+            if (towerHeightHit) {
+                const towerR = castleTowerRadius + r;
+                const towerRSq = towerR * towerR;
+                const towerCenters = [
+                    [castleLeftWallX, castleBackWallZ],
+                    [castleRightWallX, castleBackWallZ],
+                    [castleLeftWallX, castleFrontWallZ],
+                    [castleRightWallX, castleFrontWallZ]
+                ];
+                for (const [tx, tz] of towerCenters) {
+                    const dx = x - tx;
+                    const dz = z - tz;
+                    if (dx * dx + dz * dz <= towerRSq) {
+                        towerHit = true;
+                        break;
+                    }
+                }
+            }
+
+            return wallHit || towerHit;
+        }
+
+        function collidesWithTreesAt(x, z, r, y = null) {
+            const hitR = treeTrunkRadius + r;
+            const hitRSq = hitR * hitR;
+            for (const t of castleTrees) {
+                const dx = x - t.x;
+                const dz = z - t.z;
+                if (dx * dx + dz * dz > hitRSq) continue;
+                if (y === null) return true;
+                const ty = getTerrainY(t.x, t.z);
+                const topY = ty - treeTrunkHeight;
+                if (y >= topY - r && y <= ty + r) return true;
+            }
+            return false;
+        }
+
+        function collidesWithSolidAt(x, z, r, y = null) {
+            return collidesWithCastleWallsAt(x, z, r, y) || collidesWithTreesAt(x, z, r, y);
+        }
+
+        function collidesWithCastleWalls(x, z) {
+            return collidesWithSolidAt(x, z, playerRadius);
+        }
+
+        function startDesktop() {
+            applyRoomInput();
+            controlMode = 'desktop';
+            mobileUI.style.display = 'none';
+            connectMultiplayer();
+            canvas.requestPointerLock();
+        }
+
+        function startMobileControls() {
+            applyRoomInput();
+            controlMode = 'mobile';
+            isLocked = true;
+            overlay.style.display = 'none';
+            mobileUI.style.display = 'block';
+            connectMultiplayer();
+        }
+
+        startKeyboardBtn.onclick = startDesktop;
+        startMobileBtn.onclick = startMobileControls;
+
+        document.addEventListener('pointerlockchange', () => {
+            if (controlMode !== 'desktop') return;
+            isLocked = (document.pointerLockElement === canvas);
+            overlay.style.display = isLocked ? 'none' : 'flex';
+        });
+
+        window.addEventListener('wheel', e => {
+            if (controlMode === 'desktop' && isLocked) {
+                player.dist = Math.max(3, Math.min(80, player.dist + e.deltaY * 0.05));
+            }
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (controlMode === 'desktop' && isLocked) {
+                player.ry += e.movementX * 0.005;
+                player.rx = Math.max(-1.4, Math.min(1.4, player.rx + e.movementY * 0.005));
+            }
+        });
+
+        window.onkeydown = e => {
+            keys[e.code] = true;
+            if (e.code === 'Space' && player.onGround) {
+                player.vy = 0.22;
+                player.onGround = false;
+            }
+        };
+        window.onkeyup = e => keys[e.code] = false;
+
+        function readTouchById(list, id) {
+            for (const t of list) {
+                if (t.identifier === id) return t;
+            }
+            return null;
+        }
+
+        function resetStick() {
+            moveInputX = 0;
+            moveInputZ = 0;
+            stickKnob.style.transform = "translate(0px, 0px)";
+        }
+
+        leftStick.addEventListener('touchstart', e => {
+            if (leftTouchId !== null) return;
+            const t = e.changedTouches[0];
+            leftTouchId = t.identifier;
+            stick.active = true;
+            const rect = leftStick.getBoundingClientRect();
+            stick.x = t.clientX - rect.left;
+            stick.y = t.clientY - rect.top;
+            resetStick();
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        leftStick.addEventListener('touchmove', e => {
+            if (leftTouchId === null) return;
+            const t = readTouchById(e.touches, leftTouchId);
+            if (!t) return;
+            const rect = leftStick.getBoundingClientRect();
+            let dx = (t.clientX - rect.left) - stick.x;
+            let dy = (t.clientY - rect.top) - stick.y;
+            const len = Math.hypot(dx, dy);
+            if (len > stick.max) {
+                dx = (dx / len) * stick.max;
+                dy = (dy / len) * stick.max;
+            }
+            moveInputX = dx / stick.max;
+            moveInputZ = -dy / stick.max;
+            stickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        leftStick.addEventListener('touchend', e => {
+            const t = readTouchById(e.changedTouches, leftTouchId);
+            if (!t) return;
+            leftTouchId = null;
+            stick.active = false;
+            resetStick();
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        rightLook.addEventListener('touchstart', e => {
+            if (rightTouchId !== null) return;
+            const t = e.changedTouches[0];
+            rightTouchId = t.identifier;
+            lookTouchPos.x = t.clientX;
+            lookTouchPos.y = t.clientY;
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        rightLook.addEventListener('touchmove', e => {
+            if (!isLocked || controlMode !== 'mobile' || rightTouchId === null) return;
+            const t = readTouchById(e.touches, rightTouchId);
+            if (!t) return;
+            const dx = t.clientX - lookTouchPos.x;
+            const dy = t.clientY - lookTouchPos.y;
+            lookTouchPos.x = t.clientX;
+            lookTouchPos.y = t.clientY;
+            player.ry += dx * 0.006;
+            player.rx = Math.max(-1.4, Math.min(1.4, player.rx + dy * 0.006));
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        rightLook.addEventListener('touchend', e => {
+            const t = readTouchById(e.changedTouches, rightTouchId);
+            if (!t) return;
+            rightTouchId = null;
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        btnJump.addEventListener('touchstart', e => {
+            mobileJump = true;
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        btnRun.addEventListener('touchstart', e => {
+            runTouchId = e.changedTouches[0].identifier;
+            mobileRun = true;
+            e.preventDefault();
+        }, {
+            passive: false
+        });
+
+        const endRunTouch = e => {
+            if (runTouchId === null) return;
+            const t = readTouchById(e.changedTouches, runTouchId);
+            if (!t) return;
+            runTouchId = null;
+            mobileRun = false;
+            e.preventDefault();
+        };
+        btnRun.addEventListener('touchend', endRunTouch, {
+            passive: false
+        });
+        btnRun.addEventListener('touchcancel', endRunTouch, {
+            passive: false
+        });
+
+        function project(x, y, z) {
+            const headY = player.y - 2.2,
+                offsetSide = 1.2;
+            const ox = Math.cos(player.ry) * offsetSide,
+                oz = -Math.sin(player.ry) * offsetSide;
+            const anchorX = player.x + ox;
+            const anchorZ = player.z + oz;
+            const backX = -Math.sin(player.ry) * Math.cos(player.rx);
+            const backZ = -Math.cos(player.ry) * Math.cos(player.rx);
+            const backY = -Math.sin(player.rx);
+            const cameraRadius = 0.28;
+            const steps = 80;
+            let safeT = 0;
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const testX = anchorX + backX * player.dist * t;
+                const testZ = anchorZ + backZ * player.dist * t;
+                const testY = headY + backY * player.dist * t;
+                if (collidesWithSolidAt(testX, testZ, cameraRadius, testY)) break;
+                safeT = t;
+            }
+            let camX = anchorX + backX * player.dist * safeT;
+            let camZ = anchorZ + backZ * player.dist * safeT;
+            let camY = headY + backY * player.dist * safeT;
+            if (collidesWithSolidAt(camX, camZ, cameraRadius, camY)) {
+                camX = player.x;
+                camZ = player.z;
+                camY = headY;
+            }
+
+            // 2. 縲蝉ｿｮ豁｣縲大慍髱｢繧医ｊ荳九↑繧峨∝ｼｷ蛻ｶ逧・↓蝨ｰ髱｢縺ｮ縲悟ｰ代＠荳翫阪↓蝗ｺ螳壹☆繧・
+            // 縺薙ｌ縺ｧ謠冗判險育ｮ励′螢翫ｌ繧九・繧帝亟縺弱∪縺・
+            const terrainLimit = getTerrainY(camX, camZ) - 0.5;
+            if (camY > terrainLimit) {
+                camY = terrainLimit;
+            }
+
+            const ty = getTerrainY(camX, camZ);
+            if (camY > ty - 0.5) camY = ty - 0.5;
+
+            let dx = x - camX,
+                dy = y - camY,
+                dz = z - camZ;
+            let rz = dz * Math.cos(-player.ry) - dx * Math.sin(-player.ry);
+            let rx_p = dz * Math.sin(-player.ry) + dx * Math.cos(-player.ry);
+            let fY = dy * Math.cos(player.rx) - rz * Math.sin(player.rx);
+            let fZ = dy * Math.sin(player.rx) + rz * Math.cos(player.rx);
+
+            if (fZ <= 0.1) return null;
+            const f = (w / 0.75) / fZ;
+            return {
+                x: w / 2 + rx_p * f,
+                y: h / 2 + fY * f,
+                z: fZ
+            };
+        }
+
+        function getBoxData(px, py, pz, bw, bh, bd, color, ry, rx = 0, isHead = false, offX = 0, layer = 1, headStyle = null) {
+            const cY = Math.cos(ry),
+                sY = Math.sin(ry),
+                cX = Math.cos(rx),
+                sX = Math.sin(rx);
+            const getPt = (lx, ly, lz) => {
+                let ty = ly,
+                    tz = lz;
+                if (isHead) {
+                    let ryt = ly * cX - lz * sX;
+                    let rzt = ly * sX + lz * cX;
+                    ty = ryt;
+                    tz = rzt;
+                } else {
+                    ty = ly * cX - lz * sX;
+                    tz = ly * sX + lz * cX;
+                }
+                const rx_l = lx + offX;
+                return project(px + (rx_l * cY + tz * sY), py + ty, pz + (-rx_l * sY + tz * cY));
+            };
+            const w2 = bw / 2,
+                h2 = bh,
+                d2 = bd / 2;
+            const pts = [
+                getPt(-w2, 0, -d2), getPt(w2, 0, -d2), getPt(w2, h2, -d2), getPt(-w2, h2, -d2), // 0,1,2,3
+                getPt(-w2, 0, d2), getPt(w2, 0, d2), getPt(w2, h2, d2), getPt(-w2, h2, d2) // 4,5,6,7
+            ];
+            if (pts.some(v => v === null)) return [];
+
+            const faces = [{
+                p: [4, 5, 6, 7],
+                id: 'front'
+            }, {
+                p: [0, 1, 2, 3],
+                id: 'back'
+            }, {
+                p: [0, 4, 7, 3],
+                id: 'left'
+            }, {
+                p: [1, 5, 6, 2],
+                id: 'right'
+            }, {
+                p: [3, 2, 6, 7],
+                id: 'top'
+            }, {
+                p: [0, 1, 5, 4],
+                id: 'bottom'
+            }];
+
+            return faces.map(f => {
+                const p1 = pts[f.p[0]],
+                    p2 = pts[f.p[1]],
+                    p3 = pts[f.p[2]];
+                const isVisible = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x) > 0;
+                const zVals = f.p.map(i => pts[i].z);
+                const zFar = Math.max(...zVals);
+                const zNear = Math.min(...zVals);
+                const zMid = zVals.reduce((s, v) => s + v, 0) / zVals.length;
+                return {
+                    z: zMid,
+                    zFar,
+                    zNear,
+                    layer,
+                    draw: () => {
+                        const hairMain = headStyle?.hairMain || "#382215";
+                        const hairShade = headStyle?.hairShade || "#2D1A12";
+                        let fColor = color;
+                        if (isHead && f.id !== 'front' && f.id !== 'bottom') {
+                            fColor = (f.id === 'right' || f.id === 'back') ? hairShade : hairMain;
+                        }
+                        ctx.fillStyle = fColor;
+                        ctx.beginPath();
+                        f.p.forEach((idx, j) => j === 0 ? ctx.moveTo(pts[idx].x, pts[idx].y) : ctx.lineTo(pts[idx].x, pts[idx].y));
+                        ctx.fill();
+
+                        if (isHead && isVisible && f.id === 'front') {
+                            const eyeColor = headStyle?.eyeColor || "#4646B5";
+                            const longHair = !!headStyle?.longHair;
+                            const dr = (ex, ey, ew, eh, c) => {
+                                ctx.fillStyle = c;
+                                const p1b = getPt(ex, ey, d2 + 0.01),
+                                    p2b = getPt(ex + ew, ey, d2 + 0.01),
+                                    p3b = getPt(ex + ew, ey + eh, d2 + 0.01),
+                                    p4b = getPt(ex, ey + eh, d2 + 0.01);
+                                if (p1b && p2b && p3b && p4b) {
+                                    ctx.beginPath();
+                                    ctx.moveTo(p1b.x, p1b.y);
+                                    ctx.lineTo(p2b.x, p2b.y);
+                                    ctx.lineTo(p3b.x, p3b.y);
+                                    ctx.lineTo(p4b.x, p4b.y);
+                                    ctx.fill();
+                                }
+                            };
+                            dr(-0.20, -0.42, 0.12, 0.08, "#fff");
+                            dr(-0.16, -0.41, 0.07, 0.07, eyeColor);
+                            dr(0.08, -0.42, 0.12, 0.08, "#fff");
+                            dr(0.13, -0.41, 0.07, 0.07, eyeColor);
+                            dr(-0.05, -0.30, 0.10, 0.09, "#C68966");
+                            dr(-0.13, -0.18, 0.26, 0.05, hairMain);
+                            dr(-w2, -0.62, bw, 0.12, hairMain);
+                            dr(-w2, -0.58, bw * 0.5, 0.16, hairMain);
+                            dr(0, -0.58, bw * 0.5, 0.16, hairShade);
+                            dr(-w2 - 0.04, -0.52, 0.10, 0.30, hairMain);
+                            dr(w2 - 0.06, -0.52, 0.10, 0.30, hairShade);
+                            if (longHair) {
+                                dr(-w2 - 0.05, -0.34, 0.12, 0.55, hairMain);
+                                dr(w2 - 0.07, -0.34, 0.12, 0.55, hairShade);
+                                dr(-0.10, -0.30, 0.20, 0.18, hairMain);
+                            }
+                        }
+                    }
+                };
+            });
+        }
+
+        function addCastle(renderList) {
+            const baseY = castleGroundY;
+            const wallColor = "#E6E8EB";
+            const stoneMid = "#C8CDD3";
+            const roofColor = "#B7372C";
+            const doorColor = "#4C362B";
+            const frontWallZ = castleFrontWallZ;
+            const backWallZ = castleBackWallZ;
+            const leftWallX = castleLeftWallX;
+            const rightWallX = castleRightWallX;
+            const gateY = baseY;
+            const doorLeafW = castleGateWidth * 0.5 - 0.2;
+            const slide = doorOpen * 1.6;
+            const wallSpanW = castleOuterW - castleTowerW;
+            const wallSpanD = castleOuterD - castleTowerW;
+
+            renderList.push(...getBoxData(castleCenterX, baseY, backWallZ, wallSpanW, -castleWallH, castleWallT, wallColor, 0, 0, false, 0, 1));
+            const frontSegmentW = (castleOuterW - castleGateWidth) * 0.5;
+            const frontSegmentOffset = (castleGateWidth + frontSegmentW) * 0.5;
+            renderList.push(...getBoxData(castleCenterX - frontSegmentOffset, baseY, frontWallZ, frontSegmentW, -castleWallH, castleWallT, wallColor, 0, 0, false, 0, 1));
+            renderList.push(...getBoxData(castleCenterX + frontSegmentOffset, baseY, frontWallZ, frontSegmentW, -castleWallH, castleWallT, wallColor, 0, 0, false, 0, 1));
+            renderList.push(...getBoxData(leftWallX, baseY, castleCenterZ, castleWallT, -castleWallH, wallSpanD, wallColor, 0, 0, false, 0, 1));
+            renderList.push(...getBoxData(rightWallX, baseY, castleCenterZ, castleWallT, -castleWallH, wallSpanD, wallColor, 0, 0, false, 0, 1));
+
+            const towerPos = [
+                [leftWallX, backWallZ],
+                [rightWallX, backWallZ],
+                [leftWallX, frontWallZ],
+                [rightWallX, frontWallZ]
+            ];
+            towerPos.forEach(([tx, tz]) => {
+                const towerTopY = baseY - castleTowerFullH;
+                renderList.push(...getBoxData(tx, baseY, tz, castleTowerW, -castleTowerFullH, castleTowerW, stoneMid, 0, 0, false, 0, 1));
+                renderList.push(...getBoxData(tx, towerTopY, tz, castleTowerW + 0.9, -0.7, castleTowerW + 0.9, roofColor, 0, 0, false, 0, 1));
+                renderList.push(...getBoxData(tx, towerTopY - 0.7, tz, castleTowerW * 0.7, -0.9, castleTowerW * 0.7, roofColor, 0, 0, false, 0, 1));
+            });
+            renderList.push(...getBoxData(castleCenterX - doorLeafW * 0.5 - slide, gateY, frontWallZ + 0.05, doorLeafW, -castleWallH, 0.35, doorColor, 0, 0, false, 0, 3));
+            renderList.push(...getBoxData(castleCenterX + doorLeafW * 0.5 + slide, gateY, frontWallZ + 0.05, doorLeafW, -castleWallH, 0.35, doorColor, 0, 0, false, 0, 3));
+        }
+
+        function addCastleTrees(renderList) {
+            for (const t of castleTrees) {
+                const tx = t.x;
+                const tz = t.z;
+                const ty = getTerrainY(tx, tz);
+                renderList.push(...getBoxData(tx, ty, tz, 1.0, -treeTrunkHeight, 1.0, "#6B4423", 0, 0, false, 0, 2));
+                renderList.push(...getBoxData(tx, ty - 2.6, tz, 3.8, -1.8, 3.8, "#2F8F3A", 0, 0, false, 0, 2));
+                renderList.push(...getBoxData(tx, ty - 4.0, tz, 2.7, -1.5, 2.7, "#3AA847", 0, 0, false, 0, 2));
+                renderList.push(...getBoxData(tx, ty - 5.2, tz, 1.7, -1.2, 1.7, "#4ABA54", 0, 0, false, 0, 2));
+            }
+        }
+
+        function updateAlexa(frameScale) {
+            const px = player.x - alexa.x;
+            const pz = player.z - alexa.z;
+            const distToPlayer = Math.hypot(px, pz);
+            if (distToPlayer < 4.0) {
+                alexa.walk *= Math.pow(0.75, frameScale);
+                alexa.targetX = alexa.x;
+                alexa.targetZ = alexa.z;
+                alexa.ry = Math.atan2(px, pz);
+                alexa.y = getTerrainY(alexa.x, alexa.z);
+                return;
+            }
+            const ux = distToPlayer > 0.001 ? px / distToPlayer : 0;
+            const uz = distToPlayer > 0.001 ? pz / distToPlayer : 0;
+            const sideX = -uz;
+            const sideZ = ux;
+            alexa.tauntPhase += 0.035 * frameScale;
+            alexa.retargetTimer -= frameScale;
+            if (alexa.retargetTimer <= 0) {
+                alexa.retargetTimer = 6;
+                if (distToPlayer < 3.5) alexa.sideSign *= -1;
+                const orbit = 3.2 + Math.sin(alexa.tauntPhase) * 0.8;
+                const teaseBack = 1.2 + Math.cos(alexa.tauntPhase * 1.5) * 0.6;
+                alexa.targetX = player.x - ux * teaseBack + sideX * orbit * alexa.sideSign;
+                alexa.targetZ = player.z - uz * teaseBack + sideZ * orbit * alexa.sideSign;
+            }
+
+            const dx = alexa.targetX - alexa.x;
+            const dz = alexa.targetZ - alexa.z;
+            const mag = Math.hypot(dx, dz);
+            if (mag > 0.001) {
+                const speed = 0.26 * frameScale;
+                const stepX = dx / mag * speed;
+                const stepZ = dz / mag * speed;
+                const nx = alexa.x + stepX;
+                const nz = alexa.z + stepZ;
+                if (!collidesWithSolidAt(nx, alexa.z, 0.3)) alexa.x = nx;
+                else alexa.retargetTimer = 0;
+                if (!collidesWithSolidAt(alexa.x, nz, 0.3)) alexa.z = nz;
+                else alexa.retargetTimer = 0;
+                alexa.ry = Math.atan2(stepX, stepZ);
+                alexa.walk += 0.45 * frameScale;
+            } else {
+                alexa.walk *= Math.pow(0.8, frameScale);
+            }
+            if (distToPlayer < 6.0) {
+                alexa.ry = Math.atan2(player.x - alexa.x, player.z - alexa.z);
+            }
+            alexa.y = getTerrainY(alexa.x, alexa.z);
+        }
+
+        function addCharacter(renderList, ent, headRx = 0, style = {}) {
+            const topColor = style.topColor || "#1FB0B0";
+            const legColor = style.legColor || "#3D3D99";
+            const skinColor = style.skinColor || "#E3A383";
+            const headStyle = style.headStyle || null;
+            const sw = Math.sin(ent.walk) * 0.6;
+            renderList.push(...getBoxData(ent.x, ent.y - 1.8, ent.z, 0.6, 0.9, 0.3, topColor, ent.ry));
+            renderList.push(...getBoxData(ent.x, ent.y - 1.85, ent.z, 0.62, -0.62, 0.62, skinColor, ent.ry, -headRx, true, 0, 1, headStyle));
+            renderList.push(...getBoxData(ent.x, ent.y - 0.9, ent.z, 0.28, 0.9, 0.28, legColor, ent.ry, sw, false, -0.16));
+            renderList.push(...getBoxData(ent.x, ent.y - 0.9, ent.z, 0.28, 0.9, 0.28, legColor, ent.ry, -sw, false, 0.16));
+            renderList.push(...getBoxData(ent.x, ent.y - 1.8, ent.z, 0.25, 0.9, 0.25, skinColor, ent.ry, sw, false, -0.45));
+            renderList.push(...getBoxData(ent.x, ent.y - 1.8, ent.z, 0.25, 0.9, 0.25, skinColor, ent.ry, -sw, false, 0.45));
+        }
+
+        function loop(now = performance.now()) {
+            const dt = Math.min(0.05, Math.max(1 / 240, (now - lastTime) / 1000));
+            lastTime = now;
+            const frameScale = dt * 60;
+
+            if (isLocked) {
+                const gateZ = castleMaxZ + 0.7;
+                const gateDist = Math.hypot(player.x - castleCenterX, player.z - gateZ);
+                const targetDoor = gateDist < 8 ? 1 : 0;
+                const doorLerp = 1 - Math.pow(1 - 0.08, frameScale);
+                doorOpen += (targetDoor - doorOpen) * doorLerp;
+
+                if (mobileJump && player.onGround) {
+                    player.vy = 0.22;
+                    player.onGround = false;
+                }
+                mobileJump = false;
+
+                const ty = getTerrainY(player.x, player.z);
+                if (!player.onGround) {
+                    player.y -= player.vy * frameScale;
+                    player.vy -= 0.01 * frameScale;
+                    if (player.y >= ty) {
+                        player.y = ty;
+                        player.onGround = true;
+                        player.vy = 0;
+                    }
+                } else {
+                    player.y = ty;
+                }
+                let mx = 0,
+                    mz = 0;
+                if (keys['KeyW']) mz += 1;
+                if (keys['KeyS']) mz -= 1;
+                if (keys['KeyA']) mx -= 1;
+                if (keys['KeyD']) mx += 1;
+                if (controlMode === 'mobile') {
+                    mx += moveInputX;
+                    mz += moveInputZ;
+                }
+                let mag = Math.sqrt(mx * mx + mz * mz);
+                if (mag > 0) {
+                    const isRun = keys['ShiftLeft'] || (controlMode === 'mobile' && mobileRun);
+                    const speed = (isRun ? 0.35 : 0.15) * frameScale;
+                    const stepX = (Math.sin(player.ry) * mz / mag + Math.cos(player.ry) * mx / mag) * speed;
+                    const stepZ = (Math.cos(player.ry) * mz / mag - Math.sin(player.ry) * mx / mag) * speed;
+                    const nextX = player.x + stepX;
+                    const nextZ = player.z + stepZ;
+                    const currentTy = getTerrainY(player.x, player.z);
+                    const nextTyX = getTerrainY(nextX, player.z);
+                    const nextTyZ = getTerrainY(player.x, nextZ);
+                    const climbX = currentTy - nextTyX;
+                    const climbZ = currentTy - nextTyZ;
+                    const maxClimbX = Math.abs(stepX) * maxSlopeTan;
+                    const maxClimbZ = Math.abs(stepZ) * maxSlopeTan;
+                    if (climbX <= maxClimbX && !collidesWithCastleWalls(nextX, player.z)) player.x = nextX;
+                    if (climbZ <= maxClimbZ && !collidesWithCastleWalls(player.x, nextZ)) player.z = nextZ;
+                    player.walk += ((isRun ? 0.45 : 0.25) * frameScale);
+                } else player.walk *= Math.pow(0.8, frameScale);
+            }
+            const hasOtherPlayers = net.peers.size > 0;
+            if (!hasOtherPlayers) updateAlexa(frameScale);
+            sendLocalState(now);
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = "#aee2ff";
+            ctx.fillRect(0, 0, w, h);
+            let groundList = [];
+            let mountainList = [];
+            let renderList = [];
+            const gStep = 4,
+                gRange = Math.min(34, Math.max(20, Math.floor(player.dist / 2)));
+            const bX = Math.floor(player.x / gStep) * gStep,
+                bZ = Math.floor(player.z / gStep) * gStep;
+            for (let i = -gRange; i <= gRange; i++) {
+                for (let j = -gRange; j <= gRange; j++) {
+                    const gx = bX + i * gStep,
+                        gz = bZ + j * gStep;
+                    const p1 = project(gx, getTerrainY(gx, gz), gz),
+                        p2 = project(gx + gStep, getTerrainY(gx + gStep, gz), gz),
+                        p3 = project(gx + gStep, getTerrainY(gx + gStep, gz + gStep), gz + gStep),
+                        p4 = project(gx, getTerrainY(gx, gz + gStep), gz + gStep);
+                    if (p1 && p2 && p3 && p4) {
+                        const zFar = Math.max(p1.z, p2.z, p3.z, p4.z);
+                        const zNear = Math.min(p1.z, p2.z, p3.z, p4.z);
+                        const zMid = (p1.z + p2.z + p3.z + p4.z) / 4;
+                        const d = Math.sqrt((gx - player.x) ** 2 + (gz - player.z) ** 2),
+                            op = Math.max(0, 1 - d / (gStep * gRange));
+                        const mInf = (
+                            getMountainInfluence(gx, gz) +
+                            getMountainInfluence(gx + gStep, gz) +
+                            getMountainInfluence(gx + gStep, gz + gStep) +
+                            getMountainInfluence(gx, gz + gStep)
+                        ) * 0.25;
+                        const targetList = mInf > 0.35 ? mountainList : groundList;
+                        targetList.push({
+                            z: zMid,
+                            zFar,
+                            zNear,
+                            layer: mInf > 0.35 ? 2 : 0,
+                            draw: () => {
+                                const fillRgb = mInf > 0.35 ? "38, 72, 24" : "43, 88, 12";
+                                const edgeRgb = mInf > 0.35 ? "84, 130, 52" : "116, 184, 22";
+                                ctx.fillStyle = `rgba(${fillRgb}, ${op})`;
+                                ctx.strokeStyle = `rgba(${edgeRgb}, ${op*0.25})`;
+                                ctx.beginPath();
+                                ctx.moveTo(p1.x, p1.y);
+                                ctx.lineTo(p2.x, p2.y);
+                                ctx.lineTo(p3.x, p3.y);
+                                ctx.lineTo(p4.x, p4.y);
+                                ctx.fill();
+                                ctx.stroke();
+                            }
+                        });
+                    }
+                }
+            }
+            addCastle(renderList);
+            addCastleTrees(renderList);
+            addCharacter(renderList, player, player.rx);
+            if (!hasOtherPlayers) {
+                addCharacter(renderList, alexa, 0, {
+                    topColor: "#58B26A",
+                    legColor: "#2E7E43",
+                    skinColor: "#F0C8A8",
+                    headStyle: {
+                        hairMain: "#E2C45A",
+                        hairShade: "#E2C45A",
+                        eyeColor: "#2E7E43",
+                        longHair: true
+                    }
+                });
+            }
+            for (const peerState of net.peers.values()) {
+                const remote = {
+                    x: peerState.x || 0,
+                    y: peerState.y || getTerrainY(peerState.x || 0, peerState.z || 0),
+                    z: peerState.z || 0,
+                    ry: peerState.ry || 0,
+                    walk: peerState.walk || 0
+                };
+                addCharacter(renderList, remote, peerState.rx || 0, {
+                    topColor: "#4E9FD2",
+                    legColor: "#2A4F88",
+                    skinColor: "#E6BC98"
+                });
+            }
+            groundList
+                .sort((a, b) => {
+                    const farDiff = b.zFar - a.zFar;
+                    if (Math.abs(farDiff) > 0.001) return farDiff;
+                    const nearDiff = b.zNear - a.zNear;
+                    if (Math.abs(nearDiff) > 0.001) return nearDiff;
+                    return b.z - a.z;
+                })
+                .forEach(obj => obj.draw());
+            const drawList = renderList.concat(mountainList);
+            drawList
+                .sort((a, b) => {
+                    const farDiff = b.zFar - a.zFar;
+                    if (Math.abs(farDiff) > 0.001) return farDiff;
+                    const nearDiff = b.zNear - a.zNear;
+                    if (Math.abs(nearDiff) > 0.001) return nearDiff;
+                    const la = a.layer ?? 1;
+                    const lb = b.layer ?? 1;
+                    if (la !== lb) return la - lb;
+                    return b.z - a.z;
+                })
+                .forEach(obj => obj.draw());
+            const alexaTag = !hasOtherPlayers ? project(alexa.x, alexa.y - 3.25, alexa.z) : null;
+            if (alexaTag) {
+                const label = "alexa";
+                ctx.font = "bold 14px sans-serif";
+                const tw = ctx.measureText(label).width;
+                const padX = 8;
+                const padY = 4;
+                const bx = alexaTag.x - tw / 2 - padX;
+                const by = alexaTag.y - 24;
+                const bw = tw + padX * 2;
+                const bh = 20;
+                ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+                ctx.fillRect(bx, by, bw, bh);
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillText(label, alexaTag.x - tw / 2, by + bh - padY - 1);
+            }
+            if (net.peers.size > 0) {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+                ctx.fillRect(10, 10, 140, 28);
+                ctx.fillStyle = "white";
+                ctx.font = "13px sans-serif";
+                ctx.fillText(`Players: ${net.peers.size + 1}`, 18, 29);
+            }
+            // HUD
+            ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+            ctx.fillRect(w - 150, 10, 140, 75);
+            ctx.fillStyle = "white";
+            ctx.font = "14px monospace";
+            ctx.fillText(`X: ${player.x.toFixed(2)}`, w - 140, 30);
+            ctx.fillText(`Y: ${player.y.toFixed(2)}`, w - 140, 50);
+            ctx.fillText(`Z: ${player.z.toFixed(2)}`, w - 140, 70);
+
+            requestAnimationFrame(loop);
+        }
+        loop();
+    </script>
+</body>
+
+</html>
